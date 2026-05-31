@@ -19,6 +19,8 @@ reads it from cache instead of re-paying for it.
 
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
@@ -164,11 +166,41 @@ class Agent:
             turn_usage.add(usage)
             yield {"type": "usage", "step": step, "usage": usage}
 
+            # Raw API response, exactly as Anthropic returned it. Pydantic's
+            # model_dump gives us the full shape -- thinking signatures,
+            # tool_use ids, stop_reason, the lot. This is the provider-native
+            # data before any conversion to a domain type.
+            raw = response.model_dump(mode="json")
+            print(
+                f"\n===== RAW RESPONSE (step {step}, stop_reason="
+                f"{response.stop_reason}) =====",
+                file=sys.stderr,
+            )
+            print(json.dumps(raw, indent=2), file=sys.stderr)
+            yield {
+                "type": "raw",
+                "step": step,
+                "stop_reason": response.stop_reason,
+                "data": raw,
+            }
+
             step_text_parts: list[str] = []
             for block in response.content:
                 btype = getattr(block, "type", None)
                 if btype == "thinking":
-                    yield {"type": "thinking", "step": step, "text": block.thinking}
+                    yield {
+                        "type": "thinking",
+                        "step": step,
+                        "text": block.thinking,
+                        "signature": getattr(block, "signature", None),
+                    }
+                elif btype == "redacted_thinking":
+                    yield {
+                        "type": "thinking",
+                        "step": step,
+                        "text": "[redacted by Anthropic safety system]",
+                        "signature": "(redacted)",
+                    }
                 elif btype == "text":
                     step_text_parts.append(block.text)
                     yield {"type": "text", "step": step, "text": block.text}

@@ -152,7 +152,14 @@ def _render_step(step: dict) -> None:
     n = step["n"]
     for think in step["thinking"]:
         with st.expander(f"🧠 Reasoning — step {n}", expanded=False):
-            st.markdown(think)
+            st.markdown(think["text"])
+            sig = think.get("signature")
+            if sig:
+                st.caption(
+                    "🔏 thinking signature (must be sent back byte-identical "
+                    "when replaying this turn with tool use):"
+                )
+                st.code(sig, language="text")
     for txt in step["texts"]:
         if txt.strip():
             st.markdown(txt)
@@ -164,6 +171,12 @@ def _render_step(step: dict) -> None:
             if call["meta"].get("hits") is not None:
                 _render_search_hits(call["meta"])
             st.code(call["text"], language="text")
+    if step.get("raw") is not None:
+        sr = step.get("stop_reason")
+        with st.expander(
+            f"🧾 Raw API response — step {n} (stop_reason: {sr})", expanded=False
+        ):
+            st.json(step["raw"])
 
 
 def _render_metrics(usage: Usage, steps: int, model: str, cached: bool) -> None:
@@ -227,10 +240,20 @@ def execute_turn(user_text: str) -> None:
                             "thinking": [],
                             "texts": [],
                             "tools": [],
+                            "raw": None,
+                            "stop_reason": None,
                         }
                         status.update(label=f"Step {n}: calling the model…")
+                    elif etype == "raw":
+                        steps_by_n[event["step"]]["raw"] = event["data"]
+                        steps_by_n[event["step"]]["stop_reason"] = event["stop_reason"]
                     elif etype == "thinking":
-                        steps_by_n[event["step"]]["thinking"].append(event["text"])
+                        steps_by_n[event["step"]]["thinking"].append(
+                            {
+                                "text": event["text"],
+                                "signature": event.get("signature"),
+                            }
+                        )
                         status.write(f"🧠 step {event['step']}: reasoning…")
                     elif etype == "text":
                         steps_by_n[event["step"]]["texts"].append(event["text"])
